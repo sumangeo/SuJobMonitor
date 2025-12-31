@@ -23,7 +23,16 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
-    model = genai.GenerativeModel('gemini-1.5-flash-latest')
+    # --- SETUP AI MODEL ---
+    if GEMINI_API_KEY:
+        genai.configure(api_key=GEMINI_API_KEY)
+        
+        # Try the newest model first, but have a backup plan
+        try:
+            model = genai.GenerativeModel('gemini-1.5-flash')
+        except:
+            print("⚠️ Flash model failed, switching to backup...")
+            model = genai.GenerativeModel('gemini-pro')
 
 def send_telegram(message):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
@@ -61,7 +70,7 @@ def summarize_full_details(raw_text, link):
     If a detail is missing, write "Not Mentioned".
     Do NOT include Reference Numbers.
     
-    RAW TEXT: "{raw_text[:5000]}" 
+    RAW TEXT: "{raw_text[:4000]}" 
     
     OUTPUT FORMAT:
     *Post:* [Title Of Service]
@@ -74,15 +83,17 @@ def summarize_full_details(raw_text, link):
     """
     
     try:
-        # We add a print statement here to see the error in GitHub Logs
-        response = model.generate_content(prompt)
-        return response.text
-    except Exception as e:
-        # PRINT THE REAL ERROR to the logs
-        print(f"!!! AI ERROR !!!: {e}")
-        # Send the first 100 characters of the error to Telegram so you can see it
-        error_msg = str(e)[:100]
-        return f"⚠️ AI Failed: {error_msg}\n[View Link]({link})"
+            response = model.generate_content(prompt)
+            return response.text
+        except Exception as e:
+            print(f"!!! AI ERROR !!!: {e}")
+            # If the specific model failed during generation, try the backup one last time
+            try:
+                backup_model = genai.GenerativeModel('gemini-pro')
+                response = backup_model.generate_content(prompt)
+                return response.text
+            except:
+                return f"⚠️ AI Failed. [View Link]({link})"
 
 def load_history():
     if not os.path.exists(HISTORY_FILE): return set()
@@ -150,5 +161,6 @@ def check_websites():
 
 if __name__ == "__main__":
     check_websites()
+
 
 
