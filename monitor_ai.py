@@ -1,9 +1,9 @@
 import requests
 from bs4 import BeautifulSoup
 import os
-import google.generativeai as genai
 import time
 import urllib.parse
+import json # We use this instead of the Google library
 
 # --- CONFIGURATION ---
 URLS = [
@@ -19,54 +19,14 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
-# --- SMART MODEL SETUP ---
-def get_ai_response(prompt):
-    """
-    Tries to use Gemini Flash. If it fails (due to old library), 
-    it automatically switches to Gemini Pro.
-    """
+# --- DIRECT API FUNCTION (No Library Needed) ---
+def get_ai_summary(raw_text):
     if not GEMINI_API_KEY:
         return "⚠️ API Key Missing."
 
-    genai.configure(api_key=GEMINI_API_KEY)
-
-    # 1. Try the Fast/New Model First
-    try:
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        response = model.generate_content(prompt)
-        return response.text
-    except Exception as e:
-        print(f"Flash failed ({e}), switching to Backup Model...")
-        
-    # 2. Fallback to the 'Classic' Model (Works on old libraries)
-    try:
-        model = genai.GenerativeModel('gemini-pro')
-        response = model.generate_content(prompt)
-        return response.text
-    except Exception as e:
-        return f"⚠️ AI Error: {str(e)[:100]}"
-
-def send_telegram(message):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    data = {"chat_id": CHAT_ID, "text": message, "parse_mode": "Markdown", "disable_web_page_preview": True}
-    try:
-        requests.post(url, data=data)
-    except Exception as e:
-        print(f"Telegram Error: {e}")
-
-def get_page_content(link):
-    try:
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
-        response = requests.get(link, headers=headers, timeout=15)
-        soup = BeautifulSoup(response.content, 'html.parser')
-        # Remove junk script tags
-        for script in soup(["script", "style", "header", "footer", "nav"]):
-            script.decompose()
-        return soup.get_text(" ", strip=True)
-    except:
-        return None
-
-def summarize_details(raw_text, link):
+    # We call the URL directly. This bypasses the "Library Version" errors.
+    api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+    
     prompt = f"""
     Extract job details from this text. Keep it short.
     If missing, write "Not Mentioned". Do NOT include Ref No.
@@ -82,7 +42,46 @@ def summarize_details(raw_text, link):
     *Salary:* [Mention salary if found, otherwise 'Negotiable']
     *Deadline:* [Date]
     """
-    return get_ai_response(prompt)
+
+    payload = {
+        "contents": [{
+            "parts": [{"text": prompt}]
+        }]
+    }
+    
+    headers = {'Content-Type': 'application/json'}
+
+    try:
+        response = requests.post(api_url, headers=headers, data=json.dumps(payload), timeout=10)
+        
+        # Check if Google accepted it
+        if response.status_code == 200:
+            data = response.json()
+            # Extract the text from the JSON response
+            return data['candidates'][0]['content']['parts'][0]['text']
+        else:
+            print(f"Google API Error: {response.status_code} - {response.text}")
+            return "⚠️ AI Error. (Check Logs)"
+            
+    except Exception as e:
+        print(f"Network Error: {e}")
+        return "⚠️ AI Connection Failed."
+
+def send_telegram(message):
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    data = {"chat_id": CHAT_ID, "text": message, "parse_mode": "Markdown", "disable_web_page_preview": True}
+    requests.post(url, data=data)
+
+def get_page_content(link):
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        response = requests.get(link, headers=headers, timeout=15)
+        soup = BeautifulSoup(response.content, 'html.parser')
+        for script in soup(["script", "style", "header", "footer", "nav"]):
+            script.decompose()
+        return soup.get_text(" ", strip=True)
+    except:
+        return None
 
 def load_history():
     if not os.path.exists(HISTORY_FILE): return set()
@@ -93,11 +92,11 @@ def save_history(seen_set):
         for item in seen_set: f.write(f"{item}\n")
 
 def check_websites():
-    print("Checking websites...")
+    print("Checking websites (Direct API Mode)...")
     seen_jobs = load_history()
     new_found = False
     
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+    headers = {'User-Agent': 'Mozilla/5.0'}
 
     for base_url in URLS:
         try:
@@ -121,14 +120,13 @@ def check_websites():
                         seen_jobs.add(job_id)
                         new_found = True
                         
-                        # Get Details & Summarize
                         detail_text = get_page_content(full_link)
                         if detail_text:
-                            summary = summarize_details(detail_text, full_link)
-                            msg = f"🔔 **New Circular Detected!**\n\n{summary}\n\n🔗 [View Details]({full_link})"
+                            summary = get_ai_summary(detail_text)
+                            msg = f"🔔 **Suman Sir! New Circular Detected!**\n\n{summary}\n\n🔗 [View Details]({full_link})"
                             send_telegram(msg)
                             
-                        time.sleep(5) # Slow down to prevent errors
+                        time.sleep(2) 
 
         except Exception as e:
             print(f"Error checking {base_url}: {e}")
