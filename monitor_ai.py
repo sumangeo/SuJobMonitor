@@ -17,6 +17,16 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
+# List of models to try (The script will try them in order)
+MODELS_TO_TRY = [
+    "gemini-1.5-flash",
+    "gemini-1.5-flash-latest",
+    "gemini-1.5-flash-001",
+    "gemini-1.5-pro",
+    "gemini-1.0-pro",
+    "gemini-pro"
+]
+
 def send_telegram(message):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     data = {"chat_id": CHAT_ID, "text": message, "parse_mode": "Markdown", "disable_web_page_preview": True}
@@ -29,7 +39,6 @@ def get_ai_summary(raw_text):
     if not GEMINI_API_KEY:
         return "⚠️ API Key is Missing."
 
-    # Prompt
     prompt = f"""Extract job details. Write 'Not Mentioned' if missing. Do NOT include Ref No.
     RAW TEXT: "{raw_text[:4000]}"
     OUTPUT FORMAT:
@@ -40,20 +49,29 @@ def get_ai_summary(raw_text):
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
     headers = {'Content-Type': 'application/json'}
 
-    # DIRECT API CALL - Using the most standard model only
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
-    
-    try:
-        response = requests.post(url, headers=headers, data=json.dumps(payload), timeout=15)
+    # --- BRUTE FORCE LOOP ---
+    # We try every model in the list until one works
+    for model_name in MODELS_TO_TRY:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={GEMINI_API_KEY}"
         
-        if response.status_code == 200:
-            return response.json()['candidates'][0]['content']['parts'][0]['text']
-        else:
-            # If 404 or 400, it prints the EXACT reason from Google
-            return f"⚠️ AI Failed. Code: {response.status_code}\nResponse: {response.text[:200]}"
+        try:
+            # print(f"Trying model: {model_name}...") # Debug
+            response = requests.post(url, headers=headers, data=json.dumps(payload), timeout=10)
             
-    except Exception as e:
-        return f"⚠️ Network Error: {e}"
+            if response.status_code == 200:
+                # SUCCESS! We found a working model.
+                return response.json()['candidates'][0]['content']['parts'][0]['text']
+            elif response.status_code == 429:
+                return "⚠️ AI Busy (Rate Limit)."
+            elif response.status_code == 400 and "API_KEY" in response.text:
+                 return "⚠️ API Key Invalid."
+            # If 404, we just continue to the next model in the list...
+            
+        except Exception as e:
+            pass # Network error, try next model
+            
+    # If we finish the loop and NOTHING worked:
+    return "⚠️ AI Failed. All models returned 404. Check your API Key permissions."
 
 def get_page_content(link):
     try:
