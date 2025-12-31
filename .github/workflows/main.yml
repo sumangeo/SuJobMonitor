@@ -2,11 +2,14 @@ name: Check Circulars
 
 on:
   schedule:
-    - cron: '0 * * * *' # Runs every hour at minute 0
-  workflow_dispatch: # Allows you to click a button to run it manually
+    - cron: '0 */2 * * *' # Runs every 2 hours
+  workflow_dispatch: # Allows manual run button
+
+permissions:
+  contents: write # <--- CRITICAL: Allows saving the history file
 
 jobs:
-  build:
+  run-scraper:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -19,10 +22,20 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install -r requirements.txt
+          pip install requests beautifulsoup4 google-generativeai
 
       - name: Run Monitor Script
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.CHAT_ID }}
-        run: python monitor_cloud.py
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: python monitor_ai.py
+
+      # --- THIS STEP STOPS THE REPETITION ---
+      - name: Save History
+        run: |
+          git config --global user.name "GitHub Action"
+          git config --global user.email "action@github.com"
+          git add history.txt
+          # Only commit if the file actually changed
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Update job history" && git push)
