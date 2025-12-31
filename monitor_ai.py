@@ -54,21 +54,14 @@ def get_page_content(link):
 
 def summarize_full_details(raw_text, link):
     if not GEMINI_API_KEY:
-        return f"AI Key Missing. [View Link]({link})"
+        return f"⚠️ API Key Missing in Secrets. [View Link]({link})"
         
     prompt = f"""
-    You are a helpful assistant for a job seeker. 
-    Read the following text from a government job circular page.
-    
-    Extract these specific details. Keep it brief and clear.
+    You are a helpful assistant. Extract job details from this text.
     If a detail is missing, write "Not Mentioned".
+    Do NOT include Reference Numbers.
     
-    RULES:
-    1. Do NOT include the "Reference Number" or "Ref No".
-    2. Format the output exactly as below.
-    
-    RAW TEXT FROM PAGE: 
-    "{raw_text[:8000]}" 
+    RAW TEXT: "{raw_text[:5000]}" 
     
     OUTPUT FORMAT:
     *Post:* [Title Of Service]
@@ -81,10 +74,15 @@ def summarize_full_details(raw_text, link):
     """
     
     try:
+        # We add a print statement here to see the error in GitHub Logs
         response = model.generate_content(prompt)
         return response.text
     except Exception as e:
-        return f"AI Busy. Check Link: {link}"
+        # PRINT THE REAL ERROR to the logs
+        print(f"!!! AI ERROR !!!: {e}")
+        # Send the first 100 characters of the error to Telegram so you can see it
+        error_msg = str(e)[:100]
+        return f"⚠️ AI Failed: {error_msg}\n[View Link]({link})"
 
 def load_history():
     if not os.path.exists(HISTORY_FILE): return set()
@@ -152,3 +150,4 @@ def check_websites():
 
 if __name__ == "__main__":
     check_websites()
+
