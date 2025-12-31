@@ -6,6 +6,7 @@ import os
 URLS = [
     "https://www.bppa.gov.bd/advertisement-notices/advertisement-services.html", 
     "https://lged.gov.bd/site/view/notices",
+    "https://bdjobs.com/default.asp",
     "https://www.rhd.gov.bd/PublicProcurement/Index.asp"
 ]
 KEYWORDS = ["Individual Consultant", "SIC", "Consultant", "National Consultant", "Individual Local Consultant", "Local Consultant", "Environment", "Environmental", "Natural", "Disaster", "Water", "Expert", "Monitoring", "Evaluation", "Specialist"]
@@ -50,3 +51,4 @@ def check_websites():
 if __name__ == "__main__":
 
     check_websites()
+
