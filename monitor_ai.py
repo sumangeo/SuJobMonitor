@@ -13,19 +13,11 @@ URLS = [
 ]
 KEYWORDS = ["Individual Consultant", "SIC", "REOI", "National Consultant", "Environmental", "Specialist"]
 HISTORY_FILE = "history.txt"
+
+# Secrets
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-
-# List of models to try (The script will try them in order)
-MODELS_TO_TRY = [
-    "gemini-1.5-flash",
-    "gemini-1.5-flash-latest",
-    "gemini-1.5-flash-001",
-    "gemini-1.5-pro",
-    "gemini-1.0-pro",
-    "gemini-pro"
-]
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 
 def send_telegram(message):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
@@ -36,42 +28,44 @@ def send_telegram(message):
         pass
 
 def get_ai_summary(raw_text):
-    if not GEMINI_API_KEY:
+    if not GROQ_API_KEY:
         return "⚠️ API Key is Missing."
 
-    prompt = f"""Extract job details. Write 'Not Mentioned' if missing. Do NOT include Ref No.
-    RAW TEXT: "{raw_text[:4000]}"
+    # Groq API Endpoint (Standard connection, extremely fast)
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    
+    prompt = f"""You are a helpful assistant. Extract job details from the text below.
+    If a detail is missing, write "Not Mentioned". 
+    Do NOT include Reference Numbers. Keep it short.
+    
+    RAW TEXT: "{raw_text[:6000]}"
+    
     OUTPUT FORMAT:
     *Post:* [Title]
     *Agency:* [Agency Name]
     *Deadline:* [Date]"""
 
-    payload = {"contents": [{"parts": [{"text": prompt}]}]}
-    headers = {'Content-Type': 'application/json'}
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    
+    # We use Llama 3 (Free and Fast)
+    payload = {
+        "model": "llama3-8b-8192", 
+        "messages": [{"role": "user", "content": prompt}]
+    }
 
-    # --- BRUTE FORCE LOOP ---
-    # We try every model in the list until one works
-    for model_name in MODELS_TO_TRY:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={GEMINI_API_KEY}"
+    try:
+        response = requests.post(url, headers=headers, json=payload, timeout=15)
         
-        try:
-            # print(f"Trying model: {model_name}...") # Debug
-            response = requests.post(url, headers=headers, data=json.dumps(payload), timeout=10)
+        if response.status_code == 200:
+            return response.json()['choices'][0]['message']['content']
+        else:
+            return f"⚠️ Groq Error: {response.status_code}\n{response.text[:100]}"
             
-            if response.status_code == 200:
-                # SUCCESS! We found a working model.
-                return response.json()['candidates'][0]['content']['parts'][0]['text']
-            elif response.status_code == 429:
-                return "⚠️ AI Busy (Rate Limit)."
-            elif response.status_code == 400 and "API_KEY" in response.text:
-                 return "⚠️ API Key Invalid."
-            # If 404, we just continue to the next model in the list...
-            
-        except Exception as e:
-            pass # Network error, try next model
-            
-    # If we finish the loop and NOTHING worked:
-    return "⚠️ AI Failed. All models returned 404. Check your API Key permissions."
+    except Exception as e:
+        return f"⚠️ Network Error: {e}"
 
 def get_page_content(link):
     try:
@@ -91,7 +85,7 @@ def save_history(seen_set):
         for item in seen_set: f.write(f"{item}\n")
 
 def check_websites():
-    print("Checking websites...")
+    print("Checking websites (Groq Mode)...")
     seen_jobs = load_history()
     new_found = False
     headers = {'User-Agent': 'Mozilla/5.0'}
@@ -120,7 +114,7 @@ def check_websites():
                             summary = get_ai_summary(detail_text)
                             msg = f"🔔 **New Circular Detected!**\n\n{summary}\n\n🔗 [View Details]({full_link})"
                             send_telegram(msg)
-                        time.sleep(2)
+                        time.sleep(1) # Fast sleep because Groq is fast
         except Exception as e:
             print(f"Error: {e}")
 
