@@ -8,9 +8,10 @@ import json
 # --- CONFIGURATION ---
 URLS = [
     "https://www.bppa.gov.bd/advertisement-notices/advertisement-services.html",
-    "https://bdjobs.com"
+    "https://lged.gov.bd/site/view/notices",
+    "https://www.rhd.gov.bd/PublicProcurement/Index.asp"
 ]
-KEYWORDS = ["Individual Consultant", "SIC", "Consultant", "National Consultant", "Individual Local Consultant", "Local Consultant", "Environment", "Environmental", "Natural", "Disaster", "Water", "Expert", "Monitoring", "Evaluation", "Specialist"]
+KEYWORDS = ["Individual Consultant", "SIC", "REOI", "National Consultant", "Environmental", "Specialist"]
 HISTORY_FILE = "history.txt"
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
@@ -23,43 +24,37 @@ def send_telegram(message):
 
 def get_ai_summary(raw_text):
     if not GEMINI_API_KEY:
-        return "⚠️ API Key is Missing in GitHub Secrets."
+        return "⚠️ API Key is Missing."
 
     # Prompt
-    prompt = f"""Extract job details. Write 'Not Mentioned' if missing. No Ref No.
+    prompt = f"""Extract job details. Write 'Not Mentioned' if missing. Do NOT include Ref No.
     RAW TEXT: "{raw_text[:4000]}"
     OUTPUT FORMAT:
-    *Post:* [Title Of Service]
-    *Agency:* [Name of Ministry/Department, Agency]
-    *Project:* [Name of Project/Programme]
-    *Education:* [Brief degree requirement, e.g., Masters in Environmental Science]
-    *Experience:* [Years of experience required]
-    *Salary:* [Mention salary if found, otherwise 'Negotiable']
+    *Post:* [Title]
+    *Agency:* [Agency Name]
     *Deadline:* [Date]"""
 
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
     headers = {'Content-Type': 'application/json'}
 
-    # 1. Try Gemini Flash (Fastest)
+    # 1. Try Gemini 1.5 Flash (Fastest & Newest)
     url_flash = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
     try:
         response = requests.post(url_flash, headers=headers, data=json.dumps(payload), timeout=10)
         if response.status_code == 200:
             return response.json()['candidates'][0]['content']['parts'][0]['text']
-        else:
-            error_details = response.text
     except Exception as e:
-        error_details = str(e)
+        print(f"Flash Error: {e}")
 
-    # 2. If Flash failed, Try Gemini Pro (Old Reliable)
-    print(f"Flash failed. Reason: {error_details}. Switching to Pro...")
-    url_pro = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={GEMINI_API_KEY}"
+    # 2. Backup: Try Gemini 1.5 Pro (If Flash fails)
+    # UPDATED: We use 'gemini-1.5-pro' instead of the old 'gemini-pro'
+    print("Switching to Backup Model...")
+    url_pro = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key={GEMINI_API_KEY}"
     try:
         response = requests.post(url_pro, headers=headers, data=json.dumps(payload), timeout=10)
         if response.status_code == 200:
             return response.json()['candidates'][0]['content']['parts'][0]['text']
         else:
-            # SEND THE REAL ERROR TO TELEGRAM
             return f"⚠️ AI Failed.\nCode: {response.status_code}\nMessage: {response.text[:200]}"
     except Exception as e:
         return f"⚠️ Network Failed: {e}"
@@ -106,11 +101,10 @@ def check_websites():
                         seen_jobs.add(job_id)
                         new_found = True
                         
-                        # Get Details
                         detail_text = get_page_content(full_link)
                         if detail_text:
                             summary = get_ai_summary(detail_text)
-                            msg = f"🔔 **Suman Sir! New Circular Detected!**\n\n{summary}\n\n🔗 [View Details]({full_link})"
+                            msg = f"🔔 **New Circular Detected!**\n\n{summary}\n\n🔗 [View Details]({full_link})"
                             send_telegram(msg)
                         time.sleep(2)
         except Exception as e:
@@ -121,4 +115,3 @@ def check_websites():
 
 if __name__ == "__main__":
     check_websites()
-
