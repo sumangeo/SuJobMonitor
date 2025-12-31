@@ -20,7 +20,10 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 def send_telegram(message):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     data = {"chat_id": CHAT_ID, "text": message, "parse_mode": "Markdown", "disable_web_page_preview": True}
-    requests.post(url, data=data)
+    try:
+        requests.post(url, data=data, timeout=10)
+    except:
+        pass
 
 def get_ai_summary(raw_text):
     if not GEMINI_API_KEY:
@@ -37,27 +40,20 @@ def get_ai_summary(raw_text):
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
     headers = {'Content-Type': 'application/json'}
 
-    # 1. Try Gemini 1.5 Flash (Fastest & Newest)
-    url_flash = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+    # DIRECT API CALL - Using the most standard model only
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+    
     try:
-        response = requests.post(url_flash, headers=headers, data=json.dumps(payload), timeout=10)
-        if response.status_code == 200:
-            return response.json()['candidates'][0]['content']['parts'][0]['text']
-    except Exception as e:
-        print(f"Flash Error: {e}")
-
-    # 2. Backup: Try Gemini 1.5 Pro (If Flash fails)
-    # UPDATED: We use 'gemini-1.5-pro' instead of the old 'gemini-pro'
-    print("Switching to Backup Model...")
-    url_pro = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key={GEMINI_API_KEY}"
-    try:
-        response = requests.post(url_pro, headers=headers, data=json.dumps(payload), timeout=10)
+        response = requests.post(url, headers=headers, data=json.dumps(payload), timeout=15)
+        
         if response.status_code == 200:
             return response.json()['candidates'][0]['content']['parts'][0]['text']
         else:
-            return f"⚠️ AI Failed.\nCode: {response.status_code}\nMessage: {response.text[:200]}"
+            # If 404 or 400, it prints the EXACT reason from Google
+            return f"⚠️ AI Failed. Code: {response.status_code}\nResponse: {response.text[:200]}"
+            
     except Exception as e:
-        return f"⚠️ Network Failed: {e}"
+        return f"⚠️ Network Error: {e}"
 
 def get_page_content(link):
     try:
