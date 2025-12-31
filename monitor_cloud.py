@@ -8,7 +8,7 @@ URLS = [
     "https://lged.gov.bd/site/view/notices",
     "https://www.rhd.gov.bd/PublicProcurement/Index.asp"
 ]
-KEYWORDS = ["Individual Consultant", "SIC", "REOI", "National Consultant", "Environmental Specialist"]
+KEYWORDS = ["Individual Consultant", "SIC", "Consultant", "National Consultant", "Individual Local Consultant", "Local Consultant", "Environment", "Environmental", "Natural", "Disaster", "Water", "Expert", "Monitoring", "Evaluation", "Specialist"]
 
 # Get these from Environment Variables (for security)
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
@@ -48,4 +48,5 @@ def check_websites():
             print(f"Failed to check {url}: {e}")
 
 if __name__ == "__main__":
+
     check_websites()
