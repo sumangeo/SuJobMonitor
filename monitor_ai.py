@@ -83,17 +83,17 @@ def summarize_full_details(raw_text, link):
     """
     
     try:
-            response = model.generate_content(prompt)
+        response = model.generate_content(prompt)
+        return response.text
+    except Exception as e:
+        print(f"!!! AI ERROR !!!: {e}")
+        # If the specific model failed during generation, try the backup one last time
+        try:
+            backup_model = genai.GenerativeModel('gemini-pro')
+            response = backup_model.generate_content(prompt)
             return response.text
-        except Exception as e:
-            print(f"!!! AI ERROR !!!: {e}")
-            # If the specific model failed during generation, try the backup one last time
-            try:
-                backup_model = genai.GenerativeModel('gemini-pro')
-                response = backup_model.generate_content(prompt)
-                return response.text
-            except:
-                return f"⚠️ AI Failed. [View Link]({link})"
+        except:
+            return f"⚠️ AI Failed. [View Link]({link})"
 
 def load_history():
     if not os.path.exists(HISTORY_FILE): return set()
@@ -161,6 +161,7 @@ def check_websites():
 
 if __name__ == "__main__":
     check_websites()
+
 
 
 
