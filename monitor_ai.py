@@ -35,7 +35,7 @@ def get_ai_summary(raw_text):
     *Education:* [Brief degree requirement, e.g., Masters in Environmental Science]
     *Experience:* [Years of experience required]
     *Salary:* [Mention salary if found, otherwise 'Negotiable']
-    *Deadline:* [Date]
+    *Deadline:* [Date]"""
 
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
     headers = {'Content-Type': 'application/json'}
@@ -121,3 +121,4 @@ def check_websites():
 
 if __name__ == "__main__":
     check_websites()
+
