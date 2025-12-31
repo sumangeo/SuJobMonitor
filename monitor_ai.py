@@ -3,6 +3,7 @@ from bs4 import BeautifulSoup
 import os
 import time
 import urllib.parse
+import re  # Added for cleaning the Reference Number
 
 # --- CONFIGURATION ---
 URLS = [
@@ -13,7 +14,7 @@ URLS = [
 KEYWORDS = ["Individual Consultant", "SIC", "REOI", "National Consultant", "Environmental", "Specialist"]
 HISTORY_FILE = "history.txt"
 
-# Secrets (Only Telegram needed now)
+# Secrets
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
 
@@ -34,7 +35,7 @@ def save_history(seen_set):
         for item in seen_set: f.write(f"{item}\n")
 
 def check_websites():
-    print("Checking websites (Direct Mode - No Keys)...")
+    print("Checking websites (Clean Mode)...")
     seen_jobs = load_history()
     new_found = False
     headers = {'User-Agent': 'Mozilla/5.0'}
@@ -60,20 +61,26 @@ def check_websites():
                         seen_jobs.add(job_id)
                         new_found = True
                         
-                        # --- DIRECT EXTRACTION (No AI) ---
-                        # We grab the title directly from the link text
-                        title = link_tag.get_text(" ", strip=True)
-                        
-                        # We try to find a date in the row text
-                        import re
+                        # --- 1. Get Raw Title ---
+                        raw_title = link_tag.get_text(" ", strip=True)
+
+                        # --- 2. CLEAN THE TITLE (Remove Ref Numbers) ---
+                        # Remove "Ref No: ..." patterns
+                        clean_title = re.split(r'Ref\s*\.?\s*No', raw_title, flags=re.IGNORECASE)[0]
+                        # Remove long numeric sequences (like 34.01.000...)
+                        clean_title = re.sub(r'\d{2,}\.\d{2,}\.\d+', '', clean_title)
+                        # Remove extra spaces or trailing dashes
+                        clean_title = clean_title.strip(" -:,")
+
+                        # --- 3. Get Deadline ---
                         date_match = re.search(r'\d{2}/\d{2}/\d{4}', row_text)
                         deadline = date_match.group(0) if date_match else "See Details"
 
+                        # --- 4. Send Message with Clickable Title ---
                         msg = (
                             f"🔔 **New Circular Detected!**\n\n"
-                            f"📌 *Post:* {title}\n"
-                            f"📅 *Deadline:* {deadline}\n\n"
-                            f"🔗 [View Details]({full_link})"
+                            f"📌 *Post:* [{clean_title}]({full_link})\n"
+                            f"📅 *Deadline:* {deadline}"
                         )
                         send_telegram(msg)
                         time.sleep(1)
