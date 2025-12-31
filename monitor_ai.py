@@ -3,7 +3,6 @@ from bs4 import BeautifulSoup
 import os
 import time
 import urllib.parse
-import json
 
 # --- CONFIGURATION ---
 URLS = [
@@ -14,10 +13,9 @@ URLS = [
 KEYWORDS = ["Individual Consultant", "SIC", "REOI", "National Consultant", "Environmental", "Specialist"]
 HISTORY_FILE = "history.txt"
 
-# Secrets
+# Secrets (Only Telegram needed now)
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 
 def send_telegram(message):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
@@ -26,55 +24,6 @@ def send_telegram(message):
         requests.post(url, data=data, timeout=10)
     except:
         pass
-
-def get_ai_summary(raw_text):
-    if not GROQ_API_KEY:
-        return "⚠️ API Key is Missing."
-
-    # Groq API Endpoint (Standard connection, extremely fast)
-    url = "https://api.groq.com/openai/v1/chat/completions"
-    
-    prompt = f"""You are a helpful assistant. Extract job details from the text below.
-    If a detail is missing, write "Not Mentioned". 
-    Do NOT include Reference Numbers. Keep it short.
-    
-    RAW TEXT: "{raw_text[:6000]}"
-    
-    OUTPUT FORMAT:
-    *Post:* [Title]
-    *Agency:* [Agency Name]
-    *Deadline:* [Date]"""
-
-    headers = {
-        "Authorization": f"Bearer {GROQ_API_KEY}",
-        "Content-Type": "application/json"
-    }
-    
-    # We use Llama 3 (Free and Fast)
-    payload = {
-        "model": "llama3-8b-8192", 
-        "messages": [{"role": "user", "content": prompt}]
-    }
-
-    try:
-        response = requests.post(url, headers=headers, json=payload, timeout=15)
-        
-        if response.status_code == 200:
-            return response.json()['choices'][0]['message']['content']
-        else:
-            return f"⚠️ Groq Error: {response.status_code}\n{response.text[:100]}"
-            
-    except Exception as e:
-        return f"⚠️ Network Error: {e}"
-
-def get_page_content(link):
-    try:
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        response = requests.get(link, headers=headers, timeout=15)
-        soup = BeautifulSoup(response.content, 'html.parser')
-        for s in soup(["script", "style"]): s.decompose()
-        return soup.get_text(" ", strip=True)
-    except: return None
 
 def load_history():
     if not os.path.exists(HISTORY_FILE): return set()
@@ -85,7 +34,7 @@ def save_history(seen_set):
         for item in seen_set: f.write(f"{item}\n")
 
 def check_websites():
-    print("Checking websites (Groq Mode)...")
+    print("Checking websites (Direct Mode - No Keys)...")
     seen_jobs = load_history()
     new_found = False
     headers = {'User-Agent': 'Mozilla/5.0'}
@@ -98,7 +47,9 @@ def check_websites():
 
             for row in rows:
                 row_text = row.get_text(" ", strip=True)
+                
                 if any(k.lower() in row_text.lower() for k in KEYWORDS) and len(row_text) > 25:
+                    
                     link_tag = row.find('a', href=True)
                     if not link_tag: continue
                     
@@ -109,12 +60,24 @@ def check_websites():
                         seen_jobs.add(job_id)
                         new_found = True
                         
-                        detail_text = get_page_content(full_link)
-                        if detail_text:
-                            summary = get_ai_summary(detail_text)
-                            msg = f"🔔 **New Circular Detected!**\n\n{summary}\n\n🔗 [View Details]({full_link})"
-                            send_telegram(msg)
-                        time.sleep(1) # Fast sleep because Groq is fast
+                        # --- DIRECT EXTRACTION (No AI) ---
+                        # We grab the title directly from the link text
+                        title = link_tag.get_text(" ", strip=True)
+                        
+                        # We try to find a date in the row text
+                        import re
+                        date_match = re.search(r'\d{2}/\d{2}/\d{4}', row_text)
+                        deadline = date_match.group(0) if date_match else "See Details"
+
+                        msg = (
+                            f"🔔 **New Circular Detected!**\n\n"
+                            f"📌 *Post:* {title}\n"
+                            f"📅 *Deadline:* {deadline}\n\n"
+                            f"🔗 [View Details]({full_link})"
+                        )
+                        send_telegram(msg)
+                        time.sleep(1)
+
         except Exception as e:
             print(f"Error: {e}")
 
