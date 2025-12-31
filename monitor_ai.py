@@ -70,7 +70,8 @@ def summarize_full_details(raw_text, link):
     try:
         genai.configure(api_key=GEMINI_API_KEY)
         # Use the standard, stable model name
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        # model = genai.GenerativeModel('gemini-1.5-flash')
+        model = genai.GenerativeModel('gemini-pro')
     except Exception as e:
         return f"⚠️ Setup Error: {str(e)[:50]} [View Link]({link})"
 
@@ -175,6 +176,7 @@ def check_websites():
 
 if __name__ == "__main__":
     check_websites()
+
 
 
 
