@@ -62,15 +62,23 @@ def get_page_content(link):
         return None
 
 def summarize_full_details(raw_text, link):
+    # 1. Check Key Presence
     if not GEMINI_API_KEY:
-        return f"⚠️ API Key Missing in Secrets. [View Link]({link})"
-        
-    prompt = f"""
-    You are a helpful assistant. Extract job details from this text.
-    If a detail is missing, write "Not Mentioned".
-    Do NOT include Reference Numbers.
+        return f"⚠️ API Key Missing. [View Link]({link})"
     
-    RAW TEXT: "{raw_text[:4000]}" 
+    # 2. Configure AI (Do this inside the function to be safe)
+    try:
+        genai.configure(api_key=GEMINI_API_KEY)
+        # Use the standard, stable model name
+        model = genai.GenerativeModel('gemini-1.5-flash')
+    except Exception as e:
+        return f"⚠️ Setup Error: {str(e)[:50]} [View Link]({link})"
+
+    prompt = f"""
+    Extract job details. If missing, write "Not Mentioned".
+    Do NOT include Ref No.
+    
+    RAW TEXT: "{raw_text[:4000]}"
     
     OUTPUT FORMAT:
     *Post:* [Title Of Service]
@@ -82,18 +90,24 @@ def summarize_full_details(raw_text, link):
     *Deadline:* [Date]
     """
     
+    # 3. Generate Content with precise error catching
     try:
         response = model.generate_content(prompt)
         return response.text
     except Exception as e:
-        print(f"!!! AI ERROR !!!: {e}")
-        # If the specific model failed during generation, try the backup one last time
-        try:
-            backup_model = genai.GenerativeModel('gemini-pro')
-            response = backup_model.generate_content(prompt)
-            return response.text
-        except:
-            return f"⚠️ AI Failed. [View Link]({link})"
+        # RETURN THE ACTUAL ERROR MESSAGE
+        error_msg = str(e)
+        print(f"!!! AI ERROR !!!: {error_msg}") # Prints to GitHub Logs
+        
+        if "404" in error_msg:
+            return f"⚠️ Model Not Found (Library Old). [View Link]({link})"
+        elif "429" in error_msg:
+            return f"⚠️ AI Busy (Rate Limit). [View Link]({link})"
+        elif "API_KEY" in error_msg:
+            return f"⚠️ Key Invalid. [View Link]({link})"
+        else:
+            # Show the first 50 chars of the weird error
+            return f"⚠️ Error: {error_msg[:50]}... [View Link]({link})"
 
 def load_history():
     if not os.path.exists(HISTORY_FILE): return set()
@@ -161,6 +175,7 @@ def check_websites():
 
 if __name__ == "__main__":
     check_websites()
+
 
 
 
