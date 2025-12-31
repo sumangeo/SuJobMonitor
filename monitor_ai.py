@@ -11,9 +11,7 @@ URLS = [
     "https://bdjobs.com"
 ]
 
-# Keywords to match in the Title first
 KEYWORDS = ["Individual Consultant", "SIC", "Consultant", "National Consultant", "Individual Local Consultant", "Local Consultant", "Environment", "Environmental", "Natural", "Disaster", "Water", "Expert", "Monitoring", "Evaluation", "Specialist"]
-
 HISTORY_FILE = "history.txt"
 
 # --- SECRETS ---
@@ -21,18 +19,32 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
-if GEMINI_API_KEY:
+# --- SMART MODEL SETUP ---
+def get_ai_response(prompt):
+    """
+    Tries to use Gemini Flash. If it fails (due to old library), 
+    it automatically switches to Gemini Pro.
+    """
+    if not GEMINI_API_KEY:
+        return "⚠️ API Key Missing."
+
     genai.configure(api_key=GEMINI_API_KEY)
-    # --- SETUP AI MODEL ---
-    if GEMINI_API_KEY:
-        genai.configure(api_key=GEMINI_API_KEY)
+
+    # 1. Try the Fast/New Model First
+    try:
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        response = model.generate_content(prompt)
+        return response.text
+    except Exception as e:
+        print(f"Flash failed ({e}), switching to Backup Model...")
         
-        # Try the newest model first, but have a backup plan
-        try:
-            model = genai.GenerativeModel('gemini-1.5-flash')
-        except:
-            print("⚠️ Flash model failed, switching to backup...")
-            model = genai.GenerativeModel('gemini-pro')
+    # 2. Fallback to the 'Classic' Model (Works on old libraries)
+    try:
+        model = genai.GenerativeModel('gemini-pro')
+        response = model.generate_content(prompt)
+        return response.text
+    except Exception as e:
+        return f"⚠️ AI Error: {str(e)[:100]}"
 
 def send_telegram(message):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
@@ -43,43 +55,23 @@ def send_telegram(message):
         print(f"Telegram Error: {e}")
 
 def get_page_content(link):
-    """
-    Follows the link to get the full detailed text.
-    """
     try:
-        # Fake a browser visit to avoid blocking
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
         response = requests.get(link, headers=headers, timeout=15)
         soup = BeautifulSoup(response.content, 'html.parser')
-        
-        # Get text from the body, removing script/style tags
+        # Remove junk script tags
         for script in soup(["script", "style", "header", "footer", "nav"]):
             script.decompose()
-            
         return soup.get_text(" ", strip=True)
-    except Exception as e:
-        print(f"Could not fetch details: {e}")
+    except:
         return None
 
-def summarize_full_details(raw_text, link):
-    # 1. Check Key Presence
-    if not GEMINI_API_KEY:
-        return f"⚠️ API Key Missing. [View Link]({link})"
-    
-    # 2. Configure AI (Do this inside the function to be safe)
-    try:
-        genai.configure(api_key=GEMINI_API_KEY)
-        # Use the standard, stable model name
-        # model = genai.GenerativeModel('gemini-1.5-flash')
-        model = genai.GenerativeModel('gemini-pro')
-    except Exception as e:
-        return f"⚠️ Setup Error: {str(e)[:50]} [View Link]({link})"
-
+def summarize_details(raw_text, link):
     prompt = f"""
-    Extract job details. If missing, write "Not Mentioned".
-    Do NOT include Ref No.
+    Extract job details from this text. Keep it short.
+    If missing, write "Not Mentioned". Do NOT include Ref No.
     
-    RAW TEXT: "{raw_text[:4000]}"
+    RAW TEXT: "{raw_text[:4000]}" 
     
     OUTPUT FORMAT:
     *Post:* [Title Of Service]
@@ -90,25 +82,7 @@ def summarize_full_details(raw_text, link):
     *Salary:* [Mention salary if found, otherwise 'Negotiable']
     *Deadline:* [Date]
     """
-    
-    # 3. Generate Content with precise error catching
-    try:
-        response = model.generate_content(prompt)
-        return response.text
-    except Exception as e:
-        # RETURN THE ACTUAL ERROR MESSAGE
-        error_msg = str(e)
-        print(f"!!! AI ERROR !!!: {error_msg}") # Prints to GitHub Logs
-        
-        if "404" in error_msg:
-            return f"⚠️ Model Not Found (Library Old). [View Link]({link})"
-        elif "429" in error_msg:
-            return f"⚠️ AI Busy (Rate Limit). [View Link]({link})"
-        elif "API_KEY" in error_msg:
-            return f"⚠️ Key Invalid. [View Link]({link})"
-        else:
-            # Show the first 50 chars of the weird error
-            return f"⚠️ Error: {error_msg[:50]}... [View Link]({link})"
+    return get_ai_response(prompt)
 
 def load_history():
     if not os.path.exists(HISTORY_FILE): return set()
@@ -119,7 +93,7 @@ def save_history(seen_set):
         for item in seen_set: f.write(f"{item}\n")
 
 def check_websites():
-    print("Checking websites with Detail Extraction...")
+    print("Checking websites...")
     seen_jobs = load_history()
     new_found = False
     
@@ -134,51 +108,33 @@ def check_websites():
             for row in rows:
                 row_text = row.get_text(" ", strip=True)
                 
-                # 1. First Check: Is this a relevant job?
                 if any(k.lower() in row_text.lower() for k in KEYWORDS) and len(row_text) > 25:
                     
-                    # 2. Extract the Link (The key change!)
                     link_tag = row.find('a', href=True)
-                    if not link_tag:
-                        continue
+                    if not link_tag: continue
                         
-                    relative_link = link_tag['href']
-                    # Convert "details.html" to "https://bppa.gov.bd/details.html"
-                    full_link = urllib.parse.urljoin(base_url, relative_link)
-                    
-                    # Unique ID based on the link (more accurate than text)
+                    full_link = urllib.parse.urljoin(base_url, link_tag['href'])
                     job_id = str(hash(full_link))
                     
                     if job_id not in seen_jobs:
-                        print(f"New Job Found: {full_link}")
+                        print(f"New Job: {full_link}")
                         seen_jobs.add(job_id)
                         new_found = True
                         
-                        # 3. Go to that page and get full details
+                        # Get Details & Summarize
                         detail_text = get_page_content(full_link)
-                        
                         if detail_text:
-                            # 4. Summarize the FULL details
-                            ai_summary = summarize_full_details(detail_text, full_link)
-                            
-                            msg = f"🔔 **New Circular Detected!**\n\n{ai_summary}\n\n🔗 [Apply / View Details]({full_link})"
+                            summary = summarize_details(detail_text, full_link)
+                            msg = f"🔔 **New Circular Detected!**\n\n{summary}\n\n🔗 [View Details]({full_link})"
                             send_telegram(msg)
                             
-                        # Sleep to be polite to the server
-                        time.sleep(3)
+                        time.sleep(5) # Slow down to prevent errors
 
         except Exception as e:
-            print(f"Error on {base_url}: {e}")
+            print(f"Error checking {base_url}: {e}")
 
     if new_found:
         save_history(seen_jobs)
-        print("History updated.")
 
 if __name__ == "__main__":
     check_websites()
-
-
-
-
-
-
