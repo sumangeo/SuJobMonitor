@@ -25,7 +25,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests beautifulsoup4
           pip install --upgrade "google-generativeai>=0.8.0"
-
+          
       - name: Run Monitor Script
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
