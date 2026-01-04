@@ -4,6 +4,8 @@ import os
 import time
 import urllib.parse
 import re
+import hashlib  # FIX 1: For stable IDs
+from datetime import datetime  # FIX 2: For checking dates
 
 # --- CONFIGURATION ---
 URLS = [
@@ -25,55 +27,58 @@ def send_telegram(message):
     except:
         pass
 
+def is_expired(date_str):
+    """
+    Checks if the deadline (DD/MM/YYYY) is in the past.
+    Returns True if expired, False if still valid.
+    """
+    try:
+        # Extract date using Regex (e.g., 21/12/2025)
+        match = re.search(r'(\d{2})/(\d{2})/(\d{4})', date_str)
+        if match:
+            day, month, year = map(int, match.groups())
+            deadline = datetime(year, month, day)
+            today = datetime.now()
+            # If deadline is before today (and not today), it's expired
+            if deadline < today:
+                return True
+    except:
+        pass # If we can't parse the date, assume it's NOT expired to be safe
+    return False
+
 def get_page_details(link):
-    """
-    Visits the detail page and hunts for specific info using text patterns.
-    """
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
         response = requests.get(link, headers=headers, timeout=10)
         soup = BeautifulSoup(response.content, 'html.parser')
         text = soup.get_text(" ", strip=True)
 
-        # Defaults
         project = "Not Mentioned"
         education = "Not Mentioned"
         experience = "Not Mentioned"
         salary = "Negotiable"
 
-        # --- 1. FIND PROJECT NAME ---
-        # Look for "Project Name" followed by text
+        # Patterns
         proj_match = re.search(r'Project.*?Name\s*[:\-]?\s*([A-Za-z0-9\s\(\)\-]+)', text, re.IGNORECASE)
-        if proj_match:
-            project = proj_match.group(1)[:60] + "..." # Limit length
+        if proj_match: project = proj_match.group(1)[:60] + "..."
 
-        # --- 2. FIND EDUCATION ---
-        # Look for degrees like Master, Bachelor, PhD
-        edu_keywords = ["Master", "Bachelor", "Degree", "PhD", "Diploma", "B.Sc", "M.Sc"]
+        edu_keywords = ["Master", "Bachelor", "Degree", "PhD", "Diploma"]
         for keyword in edu_keywords:
             if keyword in text:
-                # Try to grab the sentence containing the degree
                 edu_match = re.search(r'([^.]*' + keyword + r'[^.]*)', text)
                 if edu_match:
-                    education = edu_match.group(1).strip()[:80] # Grab first 80 chars
+                    education = edu_match.group(1).strip()[:80]
                     break
         
-        # --- 3. FIND EXPERIENCE ---
-        # Look for "X Years"
-        exp_match = re.search(r'(\d+|One|Two|Three|Four|Five|Ten|Fifteen)\s*(\(\w+\))?\s*Yea?rs', text, re.IGNORECASE)
-        if exp_match:
-            experience = exp_match.group(0) # e.g., "15 Years"
+        exp_match = re.search(r'(\d+|One|Two|Three|Five|Ten|Fifteen)\s*(\(\w+\))?\s*Yea?rs', text, re.IGNORECASE)
+        if exp_match: experience = exp_match.group(0)
 
-        # --- 4. FIND SALARY ---
-        # Look for "Salary", "Remuneration", "BDT", "Tk"
         sal_match = re.search(r'(Salary|Remuneration|Monthly).*?(\d{4,})', text, re.IGNORECASE)
-        if sal_match:
-            salary = f"{sal_match.group(2)} BDT"
+        if sal_match: salary = f"{sal_match.group(2)} BDT"
 
         return project, education, experience, salary
 
-    except Exception as e:
-        print(f"Error reading details: {e}")
+    except:
         return "Error", "Error", "Error", "Error"
 
 def load_history():
@@ -85,7 +90,7 @@ def save_history(seen_set):
         for item in seen_set: f.write(f"{item}\n")
 
 def check_websites():
-    print("Checking websites (Deep Scraper Mode)...")
+    print("Checking websites (Smart Filter Mode)...")
     seen_jobs = load_history()
     new_found = False
     headers = {'User-Agent': 'Mozilla/5.0'}
@@ -105,32 +110,38 @@ def check_websites():
                     if not link_tag: continue
                     
                     full_link = urllib.parse.urljoin(base_url, link_tag['href'])
-                    job_id = str(hash(full_link))
+                    
+                    # FIX 1: Use MD5 for a stable ID that never changes
+                    job_id = hashlib.md5(full_link.encode()).hexdigest()
                     
                     if job_id not in seen_jobs:
+                        # FIX 2: Check for Expiry BEFORE processing
+                        date_match = re.search(r'\d{2}/\d{2}/\d{4}', row_text)
+                        deadline = date_match.group(0) if date_match else "See Details"
+                        
+                        if is_expired(deadline):
+                            print(f"Skipping Old Job (Expired {deadline}): {full_link}")
+                            # We mark it as seen so we don't check it again, but we DON'T send an alert
+                            seen_jobs.add(job_id)
+                            new_found = True
+                            continue
+
+                        # If we reach here, it's NEW and VALID
                         seen_jobs.add(job_id)
                         new_found = True
                         
-                        # --- 1. Basic Info from Table ---
                         raw_title = link_tag.get_text(" ", strip=True)
                         clean_title = re.split(r'Ref\s*\.?\s*No', raw_title, flags=re.IGNORECASE)[0]
                         clean_title = re.sub(r'\d{2,}\.\d{2,}\.\d+', '', clean_title).strip(" -:,")
                         
-                        # Agency is often in the 3rd column
                         cols = row.find_all('td')
                         agency = cols[2].get_text(" ", strip=True)[:40] if len(cols) > 2 else "Govt Agency"
-                        
-                        # Deadline
-                        date_match = re.search(r'\d{2}/\d{2}/\d{4}', row_text)
-                        deadline = date_match.group(0) if date_match else "See Details"
 
-                        # --- 2. DEEP DIVE: Fetch Details from Link ---
-                        print(f"Fetching details for: {clean_title}...")
+                        print(f"New VALID Job Found: {clean_title}")
                         project, education, experience, salary = get_page_details(full_link)
 
-                        # --- 3. Send Message ---
                         msg = (
-                            f"🔔 **Suman Sir New Circular Detected!**\n\n"
+                            f"🔔 **Suman Sir! New Circular Detected!**\n\n"
                             f"📌 *Post:* [{clean_title}]({full_link})\n"
                             f"🏢 *Agency:* {agency}\n"
                             f"🏗️ *Project:* {project}\n"
@@ -140,7 +151,7 @@ def check_websites():
                             f"📅 *Deadline:* {deadline}"
                         )
                         send_telegram(msg)
-                        time.sleep(2) # Wait 2s between pages to be polite
+                        time.sleep(2)
 
         except Exception as e:
             print(f"Error: {e}")
@@ -150,4 +161,3 @@ def check_websites():
 
 if __name__ == "__main__":
     check_websites()
-
